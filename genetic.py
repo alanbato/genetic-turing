@@ -280,7 +280,7 @@ if __name__ == '__main__':
     # Read a File
     train_data = optimizer.parse_file('input.txt')
     model = optimizer.optimize(train_data)
-    for i, to_predict in enumerate(('1111#0000', '10#10', '01#01', '11#00')):
+    for i, to_predict in enumerate(('10101', '1001', '00010001', '11010110')):
         print()
         print('Simulacion {}'.format(i))
         print()
