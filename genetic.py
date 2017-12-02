@@ -6,7 +6,6 @@ from math import floor
 
 Input = namedtuple('Input', ['state', 'read'])
 Result = namedtuple('Result', ['state', 'write', 'direction'])
-directions = [-1, 0, 1]
 
 
 def to_tape(data, blank):
@@ -45,6 +44,15 @@ class TransitionTable:
     def __init__(self):
         self._table = {}
 
+    def __str__(self):
+        return '{}'.format(self._table)
+
+    def __repr__(self):
+        return '{!r}'.format(self._table)
+
+    def __iter__(self):
+        return ([inp, out] for inp, out in sorted(self._table.items()))
+
     def add_rule(self, input_rule, result):
         self._table[input_rule] = result
 
@@ -54,8 +62,15 @@ class TransitionTable:
         except:
             return None
 
-    def __str__(self):
-        return '{!r}'.format(self._table)
+    def prune(self):
+        out_states = [out.state for out in self._table.values()]
+        to_prune = []
+        for inp in self._table:
+            if inp.state not in out_states and inp.state != 'q0':
+                to_prune.append(inp)
+        for i, rule in enumerate(to_prune):
+            self._table.pop(rule)
+        print('Rules pruned: {}'.format(i))
 
 
 class Turing:
@@ -74,7 +89,7 @@ class Turing:
         self.output_list = [Result(state, symbol, direction)
                             for state in self.states
                             for symbol in self.symbols
-                            for direction in (0, 1, 2)]
+                            for direction in (-1, 0, 1)]
         self.num_inputs = len(self.input_list)
         self.num_outputs = len(self.output_list)
         # Differential Evolution
@@ -99,7 +114,7 @@ class Turing:
                 break
             state = result.state
             tape[head] = result.write
-            head += directions[result.direction]
+            head += result.direction
             TTL -= 1
         return ''.join(tape)[2:-2]
 
@@ -123,18 +138,18 @@ class Turing:
             steps += 1
             if TTL == 0:
                 return None
-            if head >= len(tape):
-                tape.append(self.blank)
-            elif head < 0:
-                tape.insert(0, self.blank)
-                head = 0
             input_symbol = tape[head]
             result = self.transition.evaluate(Input(state, input_symbol))
             if result is None:
                 break
             state = result.state
             tape[head] = result.write
-            head += directions[result.direction]
+            head += result.direction
+            if head >= len(tape):
+                tape.append(self.blank)
+            elif head < 0:
+                tape.insert(0, self.blank)
+                head = 0
             TTL -= 1
             print('Step {}'.format(steps))
             self.print_tape_str(tape, head)
@@ -161,9 +176,16 @@ class Turing:
             self.transition.add_rule(self.input_list[input_idx],
                                      self.output_list[output_idx])
 
+    def print_rules(self):
+        for inp, out in self.transition:
+            print('({}, {}) -> ({}, {}, {})'.format(*inp, *out))
+
+    def prune_rules(self):
+        self.transition.prune()
+
 
 class ClassicalOptimizer:
-    def __init__(self, turing, NP=50, G=100, F=0.8, CR=0.6, V=20, CV=0):
+    def __init__(self, turing, NP=50, G=200, F=0.8, CR=0.7, V=20, CV=0):
         self.turing = turing
         self.NP = NP
         self.G = G
@@ -246,8 +268,8 @@ class ClassicalOptimizer:
 
 if __name__ == '__main__':
     # Define Turing Machine
-    num_states = 2
-    symbols = ['0', '1', 'X']
+    num_states = 3
+    symbols = ['0', '1', 'X', 'Y']
     blank = 'B'
     alphabet = ['0', '1', blank]
     transition = TransitionTable()
@@ -258,8 +280,9 @@ if __name__ == '__main__':
     # Read a File
     train_data = optimizer.parse_file('input.txt')
     model = optimizer.optimize(train_data)
-    print('Simulacion')
-    to_predict = '110101001'
-    result = model.ppredict(to_predict)
-    print()
-    print('{} -> {}'.format(to_predict, result))
+    for i, to_predict in enumerate(('1111#0000', '10#10', '01#01', '11#00')):
+        print()
+        print('Simulacion {}'.format(i))
+        print()
+        result = model.ppredict(to_predict)
+        print('{} -> {}'.format(to_predict, result))
