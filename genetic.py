@@ -30,11 +30,8 @@ class Individual:
             diff_vector.append(rule - other_rule)
         return diff_vector
 
-
     def __iter__(self):
         return (rule for rule in self.rules)
-
-
 
     def add_noise(self, diffs):
         return Individual(rules=[floor(original + diff)
@@ -106,18 +103,54 @@ class Turing:
             TTL -= 1
         return ''.join(tape)[2:-2]
 
+    def print_tape_str(self, tape, head):
+        tape_str = ' {}'.format(' '.join(tape))
+        arrow_list = [' '] * len(tape_str)
+        arrow_list[(head + 1) * 2 - 1] = '^'
+        arrow_str = ''.join(arrow_list)
+        print(tape_str)
+        print(arrow_str)
+
+    def ppredict(self, input_str):
+        state = self.initial_state
+        head = 2
+        tape = to_tape(input_str, self.blank)
+        TTL = 1000
+        steps = 0
+        print('Step 0')
+        self.print_tape_str(tape, head)
+        while state not in self.final_states:
+            steps += 1
+            if TTL == 0:
+                return None
+            if head >= len(tape):
+                tape.append(self.blank)
+            elif head < 0:
+                tape.insert(0, self.blank)
+                head = 0
+            input_symbol = tape[head]
+            result = self.transition.evaluate(Input(state, input_symbol))
+            if result is None:
+                break
+            state = result.state
+            tape[head] = result.write
+            head += directions[result.direction]
+            TTL -= 1
+            print('Step {}'.format(steps))
+            self.print_tape_str(tape, head)
+        print('Total steps: {}'.format(steps))
+        return ''.join(tape)[2:-2]
+
     def evaluate(self, input_str, output_str):
         predicted = self.predict(input_str)
         if predicted is None:
-            return 10000
-        cost_value = 0
-        value = 20
-        print(predicted, output_str)
+            return 0
+        correct_counter = 0
         for predicted_value, real in zip(predicted, output_str):
             if predicted_value == real:
-                cost_value -= value
-            else:
-                cost_value += value
+                correct_counter += 1
+        # Error rate
+        cost_value = (correct_counter / len(predicted))
         return cost_value
 
     def from_individual(self, individual):
@@ -127,6 +160,7 @@ class Turing:
                 output_idx = self.num_outputs - 1
             self.transition.add_rule(self.input_list[input_idx],
                                      self.output_list[output_idx])
+
 
 class ClassicalOptimizer:
     def __init__(self, turing, NP=50, G=100, F=0.8, CR=0.6, V=20, CV=0):
@@ -139,6 +173,7 @@ class ClassicalOptimizer:
         self.CV = CV
         self.input = None
         self.output = None
+        self.train_data = None
 
     def generate_population(self):
         population = []
@@ -147,12 +182,25 @@ class ClassicalOptimizer:
                                          num_outputs=self.turing.num_outputs))
         return population
 
-    def parse_input(self, description):
-        self.input, self.output = description.strip().split(' ')
+    def parse(self, description):
+        return tuple(description.strip().split(' '))
+
+    def parse_line(self, line):
+        return [self.parse(line)]
+
+    def parse_file(self, filename):
+        data = []
+        for line in open(filename):
+            data.append(self.parse(line))
+        return data
 
     def cost_fn(self, individual):
         self.turing.from_individual(individual)
-        return self.turing.evaluate(self.input, self.output)
+        fitnesses = []
+        for input_str, expected in self.train_data:
+            fitnesses.append(self.turing.evaluate(input_str, expected))
+        avg_fitness = sum(fitnesses) / len(fitnesses)
+        return avg_fitness
 
     def evolve_generation(self, population):
         assert len(population) >= 4
@@ -167,24 +215,30 @@ class ClassicalOptimizer:
                     surrogate = random.choice(population)
                 surrogates.append(surrogate)
             diff_vector = surrogates[0] - surrogates[1]
-            weighted_vector = [diff *  self.F for diff in diff_vector]
+            weighted_vector = [diff * self.F for diff in diff_vector]
             noise_individual = surrogates[2].add_noise(weighted_vector)
-            test_individual = Individual([test if random.random() < self.CR else original
+            test_individual = Individual([test if random.random() < self.CR
+                                          else original
                                           for original, test
-                                          in zip(individual, noise_individual)])
-            survivor = min(individual, test_individual, key=self.cost_fn)
+                                          in zip(individual, noise_individual)
+                                          ])
+            survivor = max(individual, test_individual, key=self.cost_fn)
             new_population.append(survivor)
         return new_population
 
-    def optimize(self):
+    def optimize(self, train_data):
+        self.train_data = train_data
         population = self.generate_population()
-        for i in range(self.G):
-            print()
+        for i in range(1, self.G + 1):
             new_generation = self.evolve_generation(population)
             population = new_generation
-            best_so_far = min(self.cost_fn(indv) for indv in population)
-            print('Generation: {} Best: {}'.format(i, best_so_far))
-        best_individual = min(population, key=self.cost_fn)
+            best_so_far = max(self.cost_fn(indv) for indv in population)
+            best_found = best_so_far == 1.0
+            if i % 10 == 0 or best_found:
+                print('Generation: {}\tBest: {}'.format(i, best_so_far))
+            if best_found:
+                break
+        best_individual = max(population, key=self.cost_fn)
         turing = deepcopy(self.turing)
         turing.from_individual(best_individual)
         return turing
@@ -194,11 +248,18 @@ if __name__ == '__main__':
     # Define Turing Machine
     num_states = 2
     symbols = ['0', '1', 'X']
-    blank = '#'
+    blank = 'B'
     alphabet = ['0', '1', blank]
     transition = TransitionTable()
     turing = Turing(num_states, alphabet, symbols, transition, blank,)
-    optimizer = ClassicalOptimizer(turing, NP=10*turing.dimension)
-    optimizer.parse_input('1000 1001')
-    model = optimizer.optimize()
-    print(model.predict('110'))
+    optimizer = ClassicalOptimizer(turing, NP=10 * turing.dimension)
+    # Read one line
+    # train_data = optimizer.parse_line('1001010 0110101')
+    # Read a File
+    train_data = optimizer.parse_file('input.txt')
+    model = optimizer.optimize(train_data)
+    print('Simulacion')
+    to_predict = '110101001'
+    result = model.ppredict(to_predict)
+    print()
+    print('{} -> {}'.format(to_predict, result))
